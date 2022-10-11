@@ -84,89 +84,63 @@ import torch
 import torch.nn.functional as F
 
 
-class GCN(torch.nn.Module):
-    def __init__(self, hidden_channels, hidden_channels2):
-        super().__init__()
-        torch.manual_seed(1234567)
-        self.conv1 = GCNConv(dataset.num_features, hidden_channels)
-        self.conv2 = GCNConv(hidden_channels, dataset.num_classes)
-        self.conv1bis = GCNConv(hidden_channels2, hidden_channels2)
 
-    def forward(self, x, edge_index):
-        x = self.conv1(x, edge_index)
-        x = x.relu()
-        x = F.dropout(x, p=0.5, training=self.training)
-        #x = self.conv1bis(x, edge_index)
-        #x = x.relu()
-        #x = F.dropout(x, p=0.5, training=self.training)
-        x = self.conv2(x, edge_index)
-        return x
-
-class GCN2(torch.nn.Module):
+class SAGENet(torch.nn.Module):
     def __init__(self):
-        super().__init__()
-        torch.manual_seed(1234567)
-        self.conv1 = GCNConv(dataset.num_features, 200)
-        self.conv1bis = GCNConv(200, 100)
-        self.conv2bis = GCNConv(100, 40)
-        self.conv2 = GCNConv(40, dataset.num_classes)
+        super(SAGENet, self).__init__()
 
-    def forward(self, x, edge_index):
-        x = self.conv1(x, edge_index)
-        x = x.relu()
-        x = F.dropout(x, p=0.5, training=self.training)
-        x = self.conv1bis(x, edge_index)
-        x = x.relu()
-        x = F.dropout(x, p=0.5, training=self.training)
-        x = self.conv2bis(x, edge_index)
-        x = x.relu()
-        x = F.dropout(x, p=0.5, training=self.training)
-        x = self.conv2(x, edge_index)
-        return x
+        self.conv = SAGEConv(dataset.num_features,
+                             200,
+                             aggr="max")  # max, mean, add ...)
+        self.conv2 = SAGEConv(200,
+                             50,
+                             aggr="max")
+        self.conv3 = SAGEConv(50,
+                             dataset.num_classes,
+                             aggr="max")
+
+    def forward(self):
+        x = self.conv(data.x, data.edge_index)
+        x = self.conv2(x, data.edge_index)
+        x = self.conv3(x, data.edge_index)
+        return F.log_softmax(x, dim=1)
 
 
-
-#model = GCN(hidden_channels=16)
-#print(model)
-
-#model = GCN(hidden_channels=16)
-#model.eval()
-
-#out = model(data.x, data.edge_index)
-#visualize(out, color=data.y)
-
-
-
-model = GCN2()
+model = SAGENet()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=5e-4)
 criterion = torch.nn.CrossEntropyLoss()
 print('===========================================================================================================')
 print(model)
 
+
 def train():
-      model.train()
-      optimizer.zero_grad()  # Clear gradients.
-      out = model(data.x, data.edge_index)  # Perform a single forward pass.
-      loss = criterion(out[data.train_mask], data.y[data.train_mask])  # Compute the loss solely based on the training nodes.
-      loss.backward()  # Derive gradients.
-      optimizer.step()  # Update parameters based on gradients.
-      return loss
+    model.train()
+    optimizer.zero_grad()
+    F.nll_loss(model()[data.train_mask], data.y[data.train_mask]).backward()
+    optimizer.step()
+
 
 def test():
-      model.eval()
-      out = model(data.x, data.edge_index)
-      pred = out.argmax(dim=1)  # Use the class with highest probability.
-      test_correct = pred[data.test_mask] == data.y[data.test_mask]  # Check against ground-truth labels.
-      test_acc = int(test_correct.sum()) / int(data.test_mask.sum())  # Derive ratio of correct predictions.
-      return test_acc
+    model.eval()
+    logits, accs = model(), []
+    for _, mask in data('train_mask', 'val_mask', 'test_mask'):
+        pred = logits[mask].max(1)[1]
+        acc = pred.eq(data.y[mask]).sum().item() / mask.sum().item()
+        accs.append(acc)
+    return accs
 
 
-for epoch in trange(1, 201):
-    loss = train()
-    #print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}')
+best_val_acc = test_acc = 0
+for epoch in range(1, 100):
+    train()
+    _, val_acc, tmp_test_acc = test()
+    if val_acc > best_val_acc:
+        best_val_acc = val_acc
+        test_acc = tmp_test_acc
+    log = 'Epoch: {:03d}, Val: {:.4f}, Test: {:.4f}'
 
-test_acc = test()
-print(f'Test Accuracy: {test_acc:.4f}')
+    if epoch % 10 == 0:
+        print(log.format(epoch, best_val_acc, test_acc))
 
 #model.eval()
 
