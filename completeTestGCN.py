@@ -51,8 +51,6 @@ print(f'Has isolated nodes: {data.has_isolated_nodes()}')
 print(f'Has self-loops: {data.has_self_loops()}')
 print(f'Is undirected: {data.is_undirected()}')
 
-
-'''
 gt = data.y.tolist()
 train = []
 test = []
@@ -78,7 +76,6 @@ for i in test:
 data.train_mask = torch.BoolTensor(trainMask)
 data.val_mask = torch.BoolTensor(valMask)
 data.test_mask = torch.BoolTensor(testMask)
-'''
 
 from torch_geometric.nn import GCNConv
 from torch_geometric.nn import GATConv
@@ -87,31 +84,64 @@ import torch
 import torch.nn.functional as F
 
 
-
-
-from torch_geometric.nn import GATConv
-
-
-class GAT(torch.nn.Module):
-    def __init__(self, hidden_channels, heads):
+class GCN(torch.nn.Module):
+    def __init__(self, hidden_channels, hidden_channels2):
         super().__init__()
         torch.manual_seed(1234567)
-        self.conv1 = GATConv(dataset.num_features, hidden_channels, heads=heads)
-        self.conv2 = GATConv(hidden_channels*heads, dataset.num_classes)
+        self.conv1 = GCNConv(dataset.num_features, hidden_channels)
+        self.conv2 = GCNConv(hidden_channels, dataset.num_classes)
+        self.conv1bis = GCNConv(hidden_channels2, hidden_channels2)
 
     def forward(self, x, edge_index):
-        x = F.dropout(x, p=0.6, training=self.training)
         x = self.conv1(x, edge_index)
-        x = F.elu(x)
-        x = F.dropout(x, p=0.6, training=self.training)
+        x = x.relu()
+        x = F.dropout(x, p=0.5, training=self.training)
+        #x = self.conv1bis(x, edge_index)
+        #x = x.relu()
+        #x = F.dropout(x, p=0.5, training=self.training)
         x = self.conv2(x, edge_index)
         return x
 
-model = GAT(hidden_channels=8, heads=8)
-print(model)
+class GCN2(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        torch.manual_seed(1234567)
+        self.conv1 = GCNConv(dataset.num_features, 200)
+        self.conv1bis = GCNConv(200, 100)
+        self.conv2bis = GCNConv(100, 40)
+        self.conv2 = GCNConv(40, dataset.num_classes)
 
-optimizer = torch.optim.Adam(model.parameters(), lr=0.005, weight_decay=1e-3)
+    def forward(self, x, edge_index):
+        x = self.conv1(x, edge_index)
+        x = x.relu()
+        x = F.dropout(x, p=0.5, training=self.training)
+        x = self.conv1bis(x, edge_index)
+        x = x.relu()
+        x = F.dropout(x, p=0.5, training=self.training)
+        x = self.conv2bis(x, edge_index)
+        x = x.relu()
+        x = F.dropout(x, p=0.5, training=self.training)
+        x = self.conv2(x, edge_index)
+        return x
+
+
+
+#model = GCN(hidden_channels=16)
+#print(model)
+
+#model = GCN(hidden_channels=16)
+#model.eval()
+
+#out = model(data.x, data.edge_index)
+#visualize(out, color=data.y)
+
+
+
+model = GCN2()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=5e-4)
 criterion = torch.nn.CrossEntropyLoss()
+print('===========================================================================================================')
+print(model)
 
 def train():
       model.train()
@@ -122,20 +152,20 @@ def train():
       optimizer.step()  # Update parameters based on gradients.
       return loss
 
-def test(mask):
+def test():
       model.eval()
       out = model(data.x, data.edge_index)
       pred = out.argmax(dim=1)  # Use the class with highest probability.
-      correct = pred[mask] == data.y[mask]  # Check against ground-truth labels.
-      acc = int(correct.sum()) / int(mask.sum())  # Derive ratio of correct predictions.
-      return acc
+      test_correct = pred[data.test_mask] == data.y[data.test_mask]  # Check against ground-truth labels.
+      test_acc = int(test_correct.sum()) / int(data.test_mask.sum())  # Derive ratio of correct predictions.
+      return test_acc
 
 
-for epoch in range(1, 101):
+for epoch in trange(1, 201):
     loss = train()
-    val_acc = test(data.val_mask)
-    test_acc = test(data.test_mask)
-    print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}, Val: {val_acc:.4f}, Test: {test_acc:.4f}')
+    #print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}')
+
+test_acc = test()
 print(f'Test Accuracy: {test_acc:.4f}')
 
 #model.eval()
